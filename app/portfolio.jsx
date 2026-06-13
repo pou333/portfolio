@@ -215,6 +215,7 @@ export default function Portfolio({ initialLanguage = defaultLanguage }) {
 
 		if (pathname !== '/') {
 			setLanguage(routeLanguage);
+			window.localStorage.setItem(languageStorageKey, routeLanguage);
 			router.replace('/', { scroll: false });
 			return;
 		}

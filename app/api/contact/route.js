@@ -80,7 +80,7 @@ export async function POST(request) {
 	const contentType = request.headers.get('content-type') || '';
 
 	if (!token || !chatId) {
-		return jsonError('Telegram delivery is not configured yet.', 500);
+		return jsonError('Telegram delivery is not configured yet.', 503);
 	}
 
 	if (!contentType.includes('application/json')) {
@@ -130,19 +130,28 @@ export async function POST(request) {
 		return jsonError('Message should be at least 10 characters.', 400);
 	}
 
-	const telegramResponse = await fetch(
-		`${telegramApiBase}${token}/sendMessage`,
-		{
-			body: JSON.stringify({
-				chat_id: chatId,
-				disable_web_page_preview: true,
-				parse_mode: 'HTML',
-				text: buildTelegramMessage(values),
-			}),
-			headers: { 'Content-Type': 'application/json' },
-			method: 'POST',
-		},
-	);
+	let telegramResponse;
+
+	try {
+		telegramResponse = await fetch(
+			`${telegramApiBase}${token}/sendMessage`,
+			{
+				body: JSON.stringify({
+					chat_id: chatId,
+					disable_web_page_preview: true,
+					parse_mode: 'HTML',
+					text: buildTelegramMessage(values),
+				}),
+				headers: { 'Content-Type': 'application/json' },
+				method: 'POST',
+			},
+		);
+	} catch {
+		return jsonError(
+			'Message could not be sent. Please try again later.',
+			502,
+		);
+	}
 
 	if (!telegramResponse.ok) {
 		return jsonError(

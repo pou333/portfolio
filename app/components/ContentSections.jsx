@@ -174,16 +174,16 @@ function ContactForm({
 
 		const formElement = event.currentTarget;
 		const formData = new FormData(formElement);
+		const website = String(formData.get('website') || '').trim();
 		const values = {
 			email: String(formData.get('email') || '').trim(),
 			message: String(formData.get('message') || '').trim(),
 			name: String(formData.get('name') || '').trim(),
-			website: String(formData.get('website') || '').trim(),
 		};
 		const nextErrors = {};
 		const now = Date.now();
 
-		if (values.website) {
+		if (website) {
 			setStatus(form.status);
 			setLastSubmitAt(now);
 			return;
@@ -214,13 +214,14 @@ function ContactForm({
 				headers: { 'Content-Type': 'application/json' },
 				method: 'POST',
 			});
-			const result = await response.json().catch(() => ({}));
 
 			if (!response.ok) {
-				throw new Error(result.message || form.sendError);
+				throw new Error(
+					response.status === 429 ? form.status : form.sendError,
+				);
 			}
 
-			setStatus(result.message || form.sendSuccess);
+			setStatus(form.sendSuccess);
 			captureEvent('portfolio_contact_form_submitted', { language });
 			formElement.reset();
 		} catch (error) {
@@ -316,6 +317,7 @@ function ContactForm({
 						</small>
 					</label>
 					<label
+						aria-hidden="true"
 						className="contact-honeypot"
 						htmlFor="contact-website"
 					>
