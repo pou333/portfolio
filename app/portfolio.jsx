@@ -213,8 +213,9 @@ export default function Portfolio({ initialLanguage = defaultLanguage }) {
 	useEffect(() => {
 		const routeLanguage = getSupportedLanguage(initialLanguage);
 
-		if (routeLanguage !== defaultLanguage || pathname !== '/') {
+		if (pathname !== '/') {
 			setLanguage(routeLanguage);
+			router.replace('/', { scroll: false });
 			return;
 		}
 
@@ -222,7 +223,6 @@ export default function Portfolio({ initialLanguage = defaultLanguage }) {
 		const nextLanguage = getSupportedLanguage(savedLanguage);
 
 		setLanguage(nextLanguage);
-		router.replace(`/${nextLanguage}`, { scroll: false });
 	}, [initialLanguage, pathname, router]);
 
 	useEffect(() => {
@@ -357,7 +357,10 @@ export default function Portfolio({ initialLanguage = defaultLanguage }) {
 			from: language,
 			to: supportedLanguage,
 		});
-		router.replace(`/${supportedLanguage}`, { scroll: false });
+
+		if (pathname !== '/') {
+			router.replace('/', { scroll: false });
+		}
 	};
 
 	return (
