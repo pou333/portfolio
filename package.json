@@ -5,6 +5,7 @@
   "description": "Interactive Next.js portfolio for Matvey Pavlov.",
   "scripts": {
     "build": "next build",
+    "start": "next start",
     "dev": "next dev",
     "lint": "eslint app --ext .js,.jsx",
     "lint:fix": "npm run lint -- --fix"
