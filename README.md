@@ -30,3 +30,19 @@ app/
 - The portfolio is intentionally kept as a single-page experience.
 - Language strings live in `app/i18n/translations.js`.
 - WebGL shape variants and palette helpers live in `app/lib/morphTargets.js`.
+
+## Contact Form Deployment
+
+The contact form sends messages through Telegram from `app/api/contact/route.js`.
+Set these environment variables in the hosting dashboard for the production
+environment, without wrapping values in quotes:
+
+```text
+TELEGRAM_BOT_TOKEN=1234567890:botfather_token
+TELEGRAM_CHAT_ID=123456789
+```
+
+After changing production environment variables, redeploy the site. If the form
+returns `502`, check the hosting function logs for
+`[contact] Telegram delivery failed`; the log includes the Telegram status and
+response body without printing the bot token.

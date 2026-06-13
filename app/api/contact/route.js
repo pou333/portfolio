@@ -1,4 +1,4 @@
-/* eslint-disable import/prefer-default-export */
+/* eslint-disable import/prefer-default-export, no-console */
 
 const telegramApiBase = 'https://api.telegram.org/bot';
 const maxBodySize = 6000;
@@ -11,6 +11,12 @@ const maxFieldLength = {
 const rateLimitWindow = 10 * 60 * 1000;
 const maxRequestsPerWindow = 5;
 const rateLimitStore = new Map();
+
+function cleanEnv(value) {
+	return String(value || '')
+		.trim()
+		.replace(/^['"]|['"]$/g, '');
+}
 
 function cleanField(value) {
 	return String(value || '')
@@ -38,8 +44,45 @@ function buildTelegramMessage({ email, message, name }) {
 	].join('\n');
 }
 
-function jsonError(message, status) {
-	return Response.json({ message }, { status });
+function truncate(value, maxLength = 500) {
+	const text = String(value || '');
+
+	return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function jsonError(message, status, error = {}) {
+	return Response.json(
+		{
+			error: {
+				status,
+				...error,
+			},
+			message,
+		},
+		{ status },
+	);
+}
+
+function logDeliveryError(details) {
+	console.error('[contact] Telegram delivery failed', details);
+}
+
+function parseTelegramError(body) {
+	if (!body) {
+		return { telegramBody: '' };
+	}
+
+	try {
+		const parsed = JSON.parse(body);
+
+		return {
+			telegramDescription: parsed.description || null,
+			telegramErrorCode: parsed.error_code || null,
+			telegramOk: parsed.ok === true,
+		};
+	} catch {
+		return { telegramBody: truncate(body) };
+	}
 }
 
 function getClientKey(request) {
@@ -74,25 +117,47 @@ function isTooLong(values) {
 }
 
 export async function POST(request) {
-	const token = process.env.TELEGRAM_BOT_TOKEN;
-	const chatId = process.env.TELEGRAM_CHAT_ID;
+	const token = cleanEnv(process.env.TELEGRAM_BOT_TOKEN);
+	const chatId = cleanEnv(process.env.TELEGRAM_CHAT_ID);
 	const contentLength = Number(request.headers.get('content-length') || 0);
 	const contentType = request.headers.get('content-type') || '';
 
 	if (!token || !chatId) {
-		return jsonError('Telegram delivery is not configured yet.', 503);
+		logDeliveryError({
+			reason: 'missing_env',
+			hasChatId: Boolean(chatId),
+			hasToken: Boolean(token),
+		});
+
+		return jsonError('Telegram delivery is not configured yet.', 503, {
+			code: 'telegram_env_missing',
+			hasChatId: Boolean(chatId),
+			hasToken: Boolean(token),
+			hint: 'Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in hosting environment variables, then redeploy.',
+		});
 	}
 
 	if (!contentType.includes('application/json')) {
-		return jsonError('Unsupported request format.', 415);
+		return jsonError('Unsupported request format.', 415, {
+			code: 'unsupported_content_type',
+			contentType,
+			expectedContentType: 'application/json',
+		});
 	}
 
 	if (contentLength > maxBodySize) {
-		return jsonError('Message is too large.', 413);
+		return jsonError('Message is too large.', 413, {
+			code: 'body_too_large',
+			contentLength,
+			maxBodySize,
+		});
 	}
 
 	if (isRateLimited(request)) {
-		return jsonError('Too many requests. Please try again later.', 429);
+		return jsonError('Too many requests. Please try again later.', 429, {
+			code: 'rate_limited',
+			retryAfterMs: rateLimitWindow,
+		});
 	}
 
 	let payload;
@@ -100,7 +165,9 @@ export async function POST(request) {
 	try {
 		payload = await request.json();
 	} catch {
-		return jsonError('Invalid form payload.', 400);
+		return jsonError('Invalid form payload.', 400, {
+			code: 'invalid_json',
+		});
 	}
 
 	const values = {
@@ -115,19 +182,32 @@ export async function POST(request) {
 	}
 
 	if (isTooLong(values)) {
-		return jsonError('Message is too large.', 400);
+		return jsonError('Message is too large.', 400, {
+			code: 'field_too_large',
+			maxFieldLength,
+		});
 	}
 
 	if (!values.name) {
-		return jsonError('Name is required.', 400);
+		return jsonError('Name is required.', 400, {
+			code: 'missing_name',
+			field: 'name',
+		});
 	}
 
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) {
-		return jsonError('Enter a valid email.', 400);
+		return jsonError('Enter a valid email.', 400, {
+			code: 'invalid_email',
+			field: 'email',
+		});
 	}
 
 	if (values.message.length < 10) {
-		return jsonError('Message should be at least 10 characters.', 400);
+		return jsonError('Message should be at least 10 characters.', 400, {
+			code: 'message_too_short',
+			field: 'message',
+			minLength: 10,
+		});
 	}
 
 	let telegramResponse;
@@ -146,17 +226,44 @@ export async function POST(request) {
 				method: 'POST',
 			},
 		);
-	} catch {
+	} catch (error) {
+		logDeliveryError({
+			message: error instanceof Error ? error.message : String(error),
+			reason: 'fetch_failed',
+		});
+
 		return jsonError(
 			'Message could not be sent. Please try again later.',
 			502,
+			{
+				code: 'telegram_fetch_failed',
+				detail: truncate(
+					error instanceof Error ? error.message : String(error),
+				),
+				hint: 'Hosting may be unable to reach https://api.telegram.org, or outbound requests may be blocked.',
+			},
 		);
 	}
 
 	if (!telegramResponse.ok) {
+		const telegramBody = await telegramResponse.text().catch(() => '');
+		const telegramError = parseTelegramError(telegramBody);
+
+		logDeliveryError({
+			body: telegramBody,
+			reason: 'telegram_response_not_ok',
+			status: telegramResponse.status,
+		});
+
 		return jsonError(
 			'Message could not be sent. Please try again later.',
 			502,
+			{
+				code: 'telegram_response_not_ok',
+				hint: 'Check TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, and whether the bot can message this chat.',
+				telegramStatus: telegramResponse.status,
+				...telegramError,
+			},
 		);
 	}
 
